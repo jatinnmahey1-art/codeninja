@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QEMU WebAssembly Demo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 1.2em;
+            font-style: italic;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .control-group {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .control-group:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.1);
+        }
+
+        .control-group h3 {
+            margin-top: 0;
+            color: #667eea;
+            font-size: 1.2em;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+        }
+
+        input, select, button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .status {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-family: 'Courier New', monospace;
+            min-height: 100px;
+            max-height: 300px;
+            overflow-y: auto;
+            border-left: 4px solid #3498db;
+        }
+
+        .status.error {
+            border-left-color: #e74c3c;
+            background: #c0392b;
+        }
+
+        .status.success {
+            border-left-color: #2ecc71;
+            background: #27ae60;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .info-box {
+            background: #e8f4fd;
+            border: 1px solid #bee5eb;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            border-left: 4px solid #3498db;
+        }
+
+        .info-box h4 {
+            margin-top: 0;
+            color: #2980b9;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #ecf0f1;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+            display: none;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .feature-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-3px);
+        }
+
+        .feature-icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #e0e0e0;
+            color: #7f8c8d;
+        }
+
+        .github-link {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 10px 20px;
+            background: #333;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: background 0.3s ease;
+        }
+
+        .github-link:hover {
+            background: #555;
+        }
+    </style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 QEMU WebAssembly Demo</h1>
+            <p class="subtitle">Run QEMU virtual machines directly in your browser</p>
+        </header>
+
+        <div class="info-box">
+            <h4>ℹ️ About This Demo</h4>
+            <p>This demonstrates QEMU compiled to WebAssembly, enabling virtualization directly in web browsers. The workflow that builds these files is available in the <code>.github/workflows/</code> directory.</p>
+        </div>
+
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🌐</div>
+                <h4>Browser Native</h4>
+                <p>Runs entirely in your web browser</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h4>High Performance</h4>
+                <p>WebAssembly optimization</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔒</div>
+                <h4>Sandboxed</h4>
+                <p>Secure browser sandbox</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📱</div>
+                <h4>Cross Platform</h4>
+                <p>Works on any modern browser</p>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <h3>🖥️ System Configuration</h3>
+                <label for="arch">Architecture:</label>
+                <select id="arch">
+                    <option value="i386">i386 (32-bit)</option>
+                    <option value="x86_64">x86_64 (64-bit)</option>
+                </select>
+
+                <label for="memory">Memory:</label>
+                <input type="text" id="memory" value="256M" placeholder="e.g., 256M, 512M">
+
+                <label for="cpu">CPU Type:</label>
+                <input type="text" id="cpu" value="qemu32" placeholder="CPU model">
+            </div>
+
+            <div class="control-group">
+                <h3>💾 Storage</h3>
+                <label for="diskImage">Disk Image URL:</label>
+                <input type="url" id="diskImage" placeholder="https://example.com/disk.img">
+
+                <label for="diskFormat">Disk Format:</label>
+                <select id="diskFormat">
+                    <option value="raw">Raw</option>
+                    <option value="qcow2">QCOW2</option>
+                    <option value="vhd">VHD</option>
+                    <option value="vmdk">VMDK</option>
+                </select>
+
+                <button id="addDrive">+ Add Drive</button>
+            </div>
+
+            <div class="control-group">
+                <h3>🌐 Network</h3>
+                <label for="networkType">Network Type:</label>
+                <select id="networkType">
+                    <option value="user">User-mode NAT</option>
+                    <option value="none">No network</option>
+                </select>
+
+                <label for="networkDevice">Network Device:</label>
+                <select id="networkDevice">
+                    <option value="e1000">Intel E1000</option>
+                    <option value="virtio">VirtIO</option>
+                    <option value="rtl8139">RTL8139</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <h3>🎮 Control Panel</h3>
+            <button id="initialize">🔧 Initialize QEMU</button>
+            <button id="start" disabled>▶️ Start VM</button>
+            <button id="stop" disabled>⏹️ Stop VM</button>
+            <button id="reset" disabled>🔄 Reset VM</button>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Loading QEMU WebAssembly module...</p>
+        </div>
+
+        <div class="progress-bar" id="progressBar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+
+        <div class="status" id="status">
+            Ready to initialize QEMU WebAssembly...
+        </div>
+
+        <footer>
+            <p>Built with GitHub Actions • WebAssembly • Emscripten</p>
+            <a href="https://github.com/your-repo/qemu-wasm" class="github-link" target="_blank">
+                📁 View on GitHub
+            </a>
+        </footer>
+    </div>
+
+    <script>
+        class QEMUDemo {
+            constructor() {
+                this.qemu = null;
+                this.isInitialized = false;
+                this.isRunning = false;
+                this.status = document.getElementById('status');
+                this.loading = document.getElementById('loading');
+                this.progressBar = document.getElementById('progressBar');
+                this.progressFill = document.getElementById('progressFill');
+                
+                this.initializeEventListeners();
+                this.updateStatus('Ready to initialize QEMU WebAssembly...', 'info');
+            }
+
+            initializeEventListeners() {
+                document.getElementById('initialize').addEventListener('click', () => this.initialize());
+                document.getElementById('start').addEventListener('click', () => this.start());
+                document.getElementById('stop').addEventListener('click', () => this.stop());
+                document.getElementById('reset').addEventListener('click', () => this.reset());
+                document.getElementById('addDrive').addEventListener('click', () => this.addDrive());
+            }
+
+            updateStatus(message, type = 'info') {
+                this.status.textContent = message;
+                this.status.className = `status ${type}`;
+                console.log(`[${type.toUpperCase()}] ${message}`);
+            }
+
+            showProgress(percent) {
+                this.progressBar.style.display = 'block';
+                this.progressFill.style.width = `${percent}%`;
+                
+                if (percent >= 100) {
+                    setTimeout(() => {
+                        this.progressBar.style.display = 'none';
+                    }, 1000);
+                }
+            }
+
+            async initialize() {
+                if (this.isInitialized) {
+                    this.updateStatus('QEMU already initialized', 'success');
+                    return;
+                }
+
+                this.updateStatus('Initializing QEMU WebAssembly...', 'info');
+                this.loading.style.display = 'block';
+                this.showProgress(10);
+
+                try {
+                    // Simulate loading QEMU module
+                    // In real implementation, this would load the actual WASM module
+                    await this.loadQEMUModule();
+                    
+                    this.showProgress(50);
+                    
+                    // Initialize QEMU wrapper
+                    this.qemu = {
+                        initialized: true,
+                        status: 'ready'
+                    };
+
+                    this.showProgress(100);
+                    
+                    this.isInitialized = true;
+                    this.loading.style.display = 'none';
+                    this.updateStatus('✅ QEMU WebAssembly initialized successfully!', 'success');
+                    
+                    // Enable start button
+                    document.getElementById('start').disabled = false;
+                    
+                } catch (error) {
+                    this.loading.style.display = 'none';
+                    this.updateStatus(`❌ Initialization failed: ${error.message}`, 'error');
+                    console.error('QEMU initialization error:', error);
+                }
+            }
+
+            async loadQEMUModule() {
+                return new Promise((resolve) => {
+                    // Simulate module loading
+                    setTimeout(() => {
+                        // In real implementation, this would be:
+                        // import('./qemu-wrapper.js').then(module => {
+                        //     this.qemu = new module.QEMUJS();
+                        //     resolve();
+                        // });
+                        resolve();
+                    }, 2000);
+                });
+            }
+
+            async start() {
+                if (!this.isInitialized) {
+                    this.updateStatus('⚠️ Please initialize QEMU first', 'error');
+                    return;
+                }
+
+                if (this.isRunning) {
+                    this.updateStatus('⚠️ QEMU is already running', 'error');
+                    return;
+                }
+
+                const config = this.getConfiguration();
+                
+                this.updateStatus(`Starting QEMU with ${config.arch} architecture...`, 'info');
+                this.showProgress(10);
+
+                try {
+                    // Simulate QEMU startup
+                    this.showProgress(30);
+                    
+                    // In real implementation, this would be:
+                    // await this.qemu.start(config);
+                    
+                    this.showProgress(70);
+                    
+                    // Simulate boot process
+                    await this.simulateBootProcess();
+                    
+                    this.showProgress(100);
+                    
+                    this.isRunning = true;
+                    this.updateStatus(`🚀 QEMU ${config.arch} VM started successfully!`, 'success');
+                    
+                    // Update button states
+                    document.getElementById('start').disabled = true;
+                    document.getElementById('stop').disabled = false;
+                    document.getElementById('reset').disabled = false;
+                    
+                } catch (error) {
+                    this.updateStatus(`❌ Failed to start QEMU: ${error.message}`, 'error');
+                    console.error('QEMU start error:', error);
+                }
+            }
+
+            async simulateBootProcess() {
+                return new Promise((resolve) => {
+                    const bootMessages = [
+                        'Booting from virtual disk...',
+                        'Loading kernel...',
+                        'Initializing devices...',
+                        'Starting system services...',
+                        'VM ready!'
+                    ];
+
+                    bootMessages.forEach((message, index) => {
+                        setTimeout(() => {
+                            this.updateStatus(`🔄 ${message}`, 'info');
+                            if (index === bootMessages.length - 1) {
+                                resolve();
+                            }
+                        }, 500 * (index + 1));
+                    });
+                });
+            }
+
+            async stop() {
+                if (!this.isRunning) {
+                    this.updateStatus('⚠️ QEMU is not running', 'error');
+                    return;
+                }
+
+                this.updateStatus('Stopping QEMU VM...', 'info');
+
+                try {
+                    // In real implementation, this would be:
+                    // this.qemu.stop();
+                    
+                    setTimeout(() => {
+                        this.isRunning = false;
+                        this.updateStatus('⏹️ QEMU VM stopped successfully', 'success');
+                        
+                        // Update button states
+                        document.getElementById('start').disabled = false;
+                        document.getElementById('stop').disabled = true;
+                        document.getElementById('reset').disabled = true;
+                    }, 1000);
+                    
+                } catch (error) {
+                    this.updateStatus(`❌ Failed to stop QEMU: ${error.message}`, 'error');
+                    console.error('QEMU stop error:', error);
+                }
+            }
+
+            async reset() {
+                if (!this.isRunning) {
+                    this.updateStatus('⚠️ QEMU is not running', 'error');
+                    return;
+                }
+
+                this.updateStatus('Resetting QEMU VM...', 'info');
+
+                try {
+                    // In real implementation, this would be:
+                    // await this.qemu.reset();
+                    
+                    setTimeout(() => {
+                        this.updateStatus('🔄 QEMU VM reset successfully', 'success');
+                        this.simulateBootProcess();
+                    }, 1000);
+                    
+                } catch (error) {
+                    this.updateStatus(`❌ Failed to reset QEMU: ${error.message}`, 'error');
+                    console.error('QEMU reset error:', error);
+                }
+            }
+
+            getConfiguration() {
+                return {
+                    arch: document.getElementById('arch').value,
+                    memory: document.getElementById('memory').value,
+                    cpu: document.getElementById('cpu').value,
+                    diskImage: document.getElementById('diskImage').value,
+                    diskFormat: document.getElementById('diskFormat').value,
+                    networkType: document.getElementById('networkType').value,
+                    networkDevice: document.getElementById('networkDevice').value
+                };
+            }
+
+            addDrive() {
+                // In a real implementation, this would add additional drives
+                this.updateStatus('💾 Drive added (simulated)', 'info');
+            }
+        }
+
+        // Initialize the demo when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            const demo = new QEMUDemo();
+            
+            // Log availability
+            console.log('QEMU WebAssembly Demo loaded');
+            console.log('Note: This is a demonstration interface.');
+            console.log('Actual QEMU WASM files need to be built and placed in the correct location.');
+        });
+    </script>
+</body>
+</html>
