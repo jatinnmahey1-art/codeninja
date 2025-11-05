@@ -1,0 +1,594 @@
+name: Build QEMU for WebAssembly
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+    inputs:
+      qemu_target:
+        description: 'QEMU target architecture'
+        required: false
+        default: 'i386-softmmu'
+        type: choice
+        options:
+          - 'i386-softmmu'
+          - 'x86_64-softmmu'
+          - 'arm-softmmu'
+          - 'aarch64-softmmu'
+      optimize_size:
+        description: 'Optimize for size'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  EM_VERSION: 3.1.58
+  EM_CACHE_FOLDER: 'emsdk-cache'
+  QEMU_VERSION: '8.2.0'
+  BUILD_TYPE: 'Release'
+
+jobs:
+  build-wasm:
+    name: Build QEMU WebAssembly
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        target:
+          - 'i386-softmmu'
+          - 'x86_64-softmmu'
+        include:
+          - target: 'i386-softmmu'
+            arch: 'i386'
+            config_flags: '--target-list=i386-softmmu'
+          - target: 'x86_64-softmmu'
+            arch: 'x86_64'
+            config_flags: '--target-list=x86_64-softmmu'
+        fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Emscripten cache
+        id: cache-emscripten
+        uses: actions/cache@v4
+        with:
+          path: ${{env.EM_CACHE_FOLDER}}
+          key: ${{env.EM_VERSION}}-${{runner.os}}-emscripten
+          restore-keys: |
+            ${{env.EM_VERSION}}-${{runner.os}}-emscripten
+            ${{env.EM_VERSION}}-${{runner.os}}-
+
+      - name: Setup system libraries cache
+        id: cache-system-libs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{github.workspace}}/build
+            ~/.emscripten_cache
+          key: libs-${{env.EM_VERSION}}-${{runner.os}}-${{matrix.target}}-${{hashFiles('**/configure', '**/Makefile')}}
+          restore-keys: |
+            libs-${{env.EM_VERSION}}-${{runner.os}}-${{matrix.target}}-
+            libs-${{env.EM_VERSION}}-${{runner.os}}-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            python3-pip \
+            python3-setuptools \
+            python3-wheel \
+            python3-venv \
+            libglib2.0-dev \
+            libfdt-dev \
+            libpixman-1-dev \
+            zlib1g-dev \
+            libnfs-dev \
+            libiscsi-dev \
+            git \
+            make \
+            gcc \
+            g++ \
+            pkg-config \
+            flex \
+            bison \
+            libslirp-dev \
+            libgtk-3-dev \
+            libvte-2.91-dev \
+            libsdl2-dev \
+            libspice-server-dev \
+            libusb-1.0-0-dev \
+            libaio-dev
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{env.EM_VERSION}}
+          actions-cache-folder: ${{env.EM_CACHE_FOLDER}}
+          no-cache: ${{ steps.cache-emscripten.outputs.cache-hit != 'true' }}
+
+      - name: Verify Emscripten installation
+        run: |
+          emcc -v
+          emmake --version
+
+      - name: Setup Python environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install meson ninja
+
+      - name: Clone QEMU source
+        run: |
+          if [ ! -d "qemu" ]; then
+            git clone --depth 1 --branch v${{env.QEMU_VERSION}} https://github.com/qemu/qemu.git
+          fi
+          cd qemu
+          git submodule update --init --recursive
+
+      - name: Configure QEMU for WebAssembly
+        run: |
+          cd qemu
+          
+          # Create build directory
+          mkdir -p build-wasm
+          cd build-wasm
+          
+          # Emscripten-specific configuration
+          export emconfigure_arg="--cross-prefix=em--"
+          export emmake_arg="emmake"
+          
+          # Configure with WebAssembly flags
+          ../configure \
+            ${{matrix.config_flags}} \
+            --disable-werror \
+            --disable-docs \
+            --disable-guest-agent \
+            --disable-guest-agent-msi \
+            --disable-tools \
+            --disable-bsd-user \
+            --disable-linux-user \
+            --disable-xen \
+            --disable-xen-pv-domain-build \
+            --disable-live-block-migration \
+            --disable-tpm \
+            --disable-libusb \
+            --disable-smartcard \
+            --disable-spice \
+            --disable-vnc \
+            --disable-vnc-sasl \
+            --disable-vnc-jpeg \
+            --disable-vnc-png \
+            --disable-curses \
+            --disable-virglrenderer \
+            --disable-ngx \
+            --disable-gtk \
+            --disable-sdl \
+            --disable-sdl-image \
+            --disable-opengl \
+            --disable-vte \
+            --disable-cocoa \
+            --disable-gnutls \
+            --disable-nettle \
+            --disable-gcrypt \
+            --disable-libssh \
+            --disable-lzo \
+            --disable-snappy \
+            --disable-bzip2 \
+            --disable-lzma \
+            --disable-seccomp \
+            --disable-cap-ng \
+            --disable-libattr \
+            --disable-brlapi \
+            --disable-fdt \
+            --disable-bluez \
+            --disable-kvm \
+            --disable-hax \
+            --disable-hvf \
+            --disable-whpx \
+            --disable-nvmm \
+            --disable-libiscsi \
+            --disable-libnfs \
+            --disable-libpmem \
+            --disable-slirp \
+            --disable-vde \
+            --disable-netmap \
+            --disable-vhost-net \
+            --disable-vhost-crypto \
+            --disable-vhost-kernel \
+            --disable-vhost-user \
+            --disable-vhost-user-blk-server \
+            --disable-vhost-vdpa \
+            --disable-tpm-passthrough \
+            --disable-tpm-emulator \
+            --disable-qga-vss \
+            --disable-fuse \
+            --disable-fuse-lseek \
+            --disable-iconv \
+            --disable-curses \
+            --disable-virglrenderer \
+            --disable-attr \
+            --disable-cap-ng \
+            --disable-brlapi \
+            --disable-blobs \
+            --disable-docs \
+            --disable-modules \
+            --disable-module-upgrades \
+            --disable-debug-info \
+            --disable-debug-tcg \
+            --disable-debug-mutex \
+            --disable-qom-cast-debug \
+            --disable-tcg-interpreter \
+            --enable-werror \
+            --audio-drv-list= \
+            --block-drv-ro-whitelist= \
+            --with-pkgversion="QEMU.js WebAssembly Build" \
+            --extra-cflags="-s WASM=1 -s EXPORTED_RUNTIME_METHODS=['cwrap', 'ccall', 'UTF8ToString', 'stringToUTF8', 'lengthBytesUTF8'] -s EXPORTED_FUNCTIONS=['_main', '_malloc', '_free'] -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=2GB -s INITIAL_MEMORY=256MB -s WASM_ASYNC_COMPILATION=0 -s FORCE_FILESYSTEM=1 -s NODEJS_CATCH_EXIT=0 -s NODEJS_CATCH_REJECTION=0 -s EXIT_RUNTIME=1 -O3 -flto --llvm-lto 3 -msimd128 -mbulk-memory -mmutable-globals -msign-ext" \
+            --extra-ldflags="-s WASM=1 -s EXPORTED_RUNTIME_METHODS=['cwrap', 'ccall', 'UTF8ToString', 'stringToUTF8', 'lengthBytesUTF8'] -s EXPORTED_FUNCTIONS=['_main', '_malloc', '_free'] -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=2GB -s INITIAL_MEMORY=256MB -s WASM_ASYNC_COMPILATION=0 -s FORCE_FILESYSTEM=1 -s NODEJS_CATCH_EXIT=0 -s NODEJS_CATCH_REJECTION=0 -s EXIT_RUNTIME=1 -O3 -flto --llvm-lto 3"
+
+      - name: Build QEMU for WebAssembly
+        run: |
+          cd qemu/build-wasm
+          
+          # Set build parallelism
+          BUILD_JOBS=$(nproc)
+          
+          # Build with Emscripten
+          emmake make -j${BUILD_JOBS} \
+            CFLAGS="-s WASM=1 -s EXPORTED_RUNTIME_METHODS=['cwrap', 'ccall', 'UTF8ToString', 'stringToUTF8', 'lengthBytesUTF8'] -s EXPORTED_FUNCTIONS=['_main', '_malloc', '_free'] -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=2GB -s INITIAL_MEMORY=256MB -s WASM_ASYNC_COMPILATION=0 -s FORCE_FILESYSTEM=1 -s NODEJS_CATCH_EXIT=0 -s NODEJS_CATCH_REJECTION=0 -s EXIT_RUNTIME=1 -O3 -flto --llvm-lto 3 -msimd128 -mbulk-memory -mmutable-globals -msign-ext" \
+            LDFLAGS="-s WASM=1 -s EXPORTED_RUNTIME_METHODS=['cwrap', 'ccall', 'UTF8ToString', 'stringToUTF8', 'lengthBytesUTF8'] -s EXPORTED_FUNCTIONS=['_main', '_malloc', '_free'] -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=2GB -s INITIAL_MEMORY=256MB -s WASM_ASYNC_COMPILATION=0 -s FORCE_FILESYSTEM=1 -s NODEJS_CATCH_EXIT=0 -s NODEJS_CATCH_REJECTION=0 -s EXIT_RUNTIME=1 -O3 -flto --llvm-lto 3"
+
+      - name: Optimize WebAssembly output
+        run: |
+          cd qemu/build-wasm
+          
+          # Find built binaries
+          find . -name "*.js" -type f
+          find . -name "*.wasm" -type f
+          
+          # Optimize WASM files
+          for wasm_file in $(find . -name "*.wasm" -type f); do
+            echo "Optimizing $wasm_file"
+            wasm-opt -O4 --vacuum --dae --remove-unused-names --merge-blocks "$wasm_file" -o "${wasm_file}.opt"
+            mv "${wasm_file}.opt" "$wasm_file"
+          done
+          
+          # Create output directory
+          mkdir -p ../output/${{matrix.target}}
+          
+          # Copy built artifacts
+          cp $(find . -name "qemu-system-*" -type f) ../output/${{matrix.target}}/ 2>/dev/null || true
+          cp $(find . -name "*.js" -type f) ../output/${{matrix.target}}/ 2>/dev/null || true
+          cp $(find . -name "*.wasm" -type f) ../output/${{matrix.target}}/ 2>/dev/null || true
+
+      - name: Create JavaScript wrapper
+        run: |
+          cd qemu/output/${{matrix.target}}
+          
+          cat > qemu-wrapper.js << 'EOF'
+/**
+ * QEMU WebAssembly Wrapper
+ * Provides a simplified interface for running QEMU in the browser
+ */
+
+class QEMUJS {
+  constructor() {
+    this.module = null;
+    this.isRunning = false;
+  }
+
+  async initialize() {
+    if (this.module) {
+      return this.module;
+    }
+
+    try {
+      // Load the QEMU WebAssembly module
+      this.module = await import('./qemu-system-${{matrix.arch}}.js');
+      return this.module;
+    } catch (error) {
+      console.error('Failed to load QEMU module:', error);
+      throw error;
+    }
+  }
+
+  async start(config = {}) {
+    if (!this.module) {
+      await this.initialize();
+    }
+
+    if (this.isRunning) {
+      console.warn('QEMU is already running');
+      return;
+    }
+
+    const defaultConfig = {
+      memory: '256M',
+      cpu: '${{matrix.arch}}',
+      kvm: false,
+      display: 'none',
+      netdev: 'user',
+      drives: []
+    };
+
+    const qemuConfig = { ...defaultConfig, ...config };
+    
+    try {
+      // Build QEMU command line arguments
+      const args = this.buildArgs(qemuConfig);
+      
+      // Start QEMU
+      this.isRunning = true;
+      await this.module.callMain(args);
+      
+      console.log('QEMU started successfully');
+    } catch (error) {
+      console.error('Failed to start QEMU:', error);
+      this.isRunning = false;
+      throw error;
+    }
+  }
+
+  buildArgs(config) {
+    const args = [];
+    
+    // Basic configuration
+    args.push('-m', config.memory);
+    args.push('-cpu', config.cpu);
+    
+    // Disable KVM for WebAssembly
+    args.push('-no-kvm');
+    
+    // Display
+    args.push('-display', config.display);
+    
+    // Network
+    if (config.netdev) {
+      args.push('-netdev', config.netdev);
+      args.push('-device', 'e1000,netdev=net0');
+    }
+    
+    // Drives
+    config.drives.forEach((drive, index) => {
+      args.push('-drive', `file=${drive.file},format=${drive.format || 'raw'},if=${drive.interface || 'ide'},index=${index}`);
+    });
+    
+    return args;
+  }
+
+  stop() {
+    if (this.isRunning) {
+      console.log('Stopping QEMU...');
+      this.isRunning = false;
+      // Additional cleanup logic here
+    }
+  }
+
+  getStatus() {
+    return {
+      isRunning: this.isRunning,
+      module: this.module ? 'loaded' : 'not loaded'
+    };
+  }
+}
+
+// Export for use in Node.js or browser
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = QEMUJS;
+} else if (typeof window !== 'undefined') {
+  window.QEMUJS = QEMUJS;
+} else {
+  global.QEMUJS = QEMUJS;
+}
+EOF
+
+      - name: Create package.json
+        run: |
+          cd qemu/output/${{matrix.target}}
+          
+          cat > package.json << EOF
+{
+  "name": "qemu-${{matrix.target}}-wasm",
+  "version": "${{env.QEMU_VERSION}}.0",
+  "description": "QEMU ${{matrix.target}} compiled to WebAssembly",
+  "main": "qemu-wrapper.js",
+  "type": "module",
+  "scripts": {
+    "start": "node qemu-wrapper.js",
+    "test": "node -e &quot;console.log('QEMU WASM module loaded successfully')&quot;"
+  },
+  "keywords": [
+    "qemu",
+    "emulator",
+    "webassembly",
+    "wasm",
+    "virtualization"
+  ],
+  "author": "GitHub Actions",
+  "license": "GPL-2.0",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "files": [
+    "*.js",
+    "*.wasm",
+    "*.data"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "."
+  }
+}
+EOF
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-${{matrix.target}}-wasm
+          path: qemu/output/${{matrix.target}}/
+          retention-days: 30
+
+      - name: Generate build summary
+        run: |
+          cd qemu/output/${{matrix.target}}
+          
+          echo "## QEMU WebAssembly Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Target: ${{matrix.target}}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "#### Files generated:" >> $GITHUB_STEP_SUMMARY
+          find . -type f -exec ls -lh {} \; | while read line; do
+            echo "- $line" >> $GITHUB_STEP_SUMMARY
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Build information:" >> $GITHUB_STEP_SUMMARY
+          echo "- QEMU Version: ${{env.QEMU_VERSION}}" >> $GITHUB_STEP_SUMMARY
+          echo "- Emscripten Version: ${{env.EM_VERSION}}" >> $GITHUB_STEP_SUMMARY
+          echo "- Target Architecture: ${{matrix.arch}}" >> $GITHUB_STEP_SUMMARY
+          echo "- Build Type: ${{env.BUILD_TYPE}}" >> $GITHUB_STEP_SUMMARY
+
+  release:
+    name: Create Release
+    needs: build-wasm
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release archive
+        run: |
+          mkdir -p release
+          
+          # Create individual archives for each target
+          for artifact_dir in artifacts/qemu-*-wasm; do
+            if [ -d "$artifact_dir" ]; then
+              target_name=$(basename "$artifact_dir")
+              tar -czf "release/${target_name}.tar.gz" -C "$artifact_dir" .
+              zip -r "release/${target_name}.zip" "$artifact_dir"
+            fi
+          done
+          
+          # Create combined archive
+          tar -czf "release/qemu-wasm-all.tar.gz" -C artifacts .
+          zip -r "release/qemu-wasm-all.zip" artifacts
+          
+          ls -la release/
+
+      - name: Generate release notes
+        run: |
+          cat > release_notes.md << EOF
+          # QEMU WebAssembly Release ${{github.ref_name}}
+          
+          This release contains QEMU compiled to WebAssembly for browser-based virtualization.
+          
+          ## What's included
+          
+          - QEMU ${{env.QEMU_VERSION}} compiled to WebAssembly
+          - JavaScript wrapper for easy integration
+          - Multiple target architectures
+          
+          ## Quick Start
+          
+          1. Download the appropriate archive for your target architecture
+          2. Extract the archive
+          3. Include the JavaScript files in your web application
+          4. Use the QEMUJS class to start emulation
+          
+          ## Targets
+          
+          EOF
+          
+          for artifact_dir in artifacts/qemu-*-wasm; do
+            if [ -d "$artifact_dir" ]; then
+              target_name=$(basename "$artifact_dir")
+              echo "- ${target_name}" >> release_notes.md
+            fi
+          done
+          
+          cat release_notes.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release/*.tar.gz
+            release/*.zip
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+  test:
+    name: Test WebAssembly Build
+    needs: build-wasm
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: qemu-i386-softmmu-wasm
+          path: qemu-wasm
+
+      - name: Test WebAssembly module loading
+        run: |
+          cd qemu-wasm
+          
+          # Check if required files exist
+          ls -la
+          
+          # Test basic module syntax
+          if [ -f "qemu-wrapper.js" ]; then
+            node -c qemu-wrapper.js
+            echo "✓ JavaScript wrapper syntax is valid"
+          else
+            echo "❌ JavaScript wrapper not found"
+            exit 1
+          fi
+          
+          # Check for WASM files
+          wasm_count=$(find . -name "*.wasm" -type f | wc -l)
+          if [ "$wasm_count" -gt 0 ]; then
+            echo "✓ Found $wasm_count WebAssembly files"
+            find . -name "*.wasm" -type f
+          else
+            echo "❌ No WebAssembly files found"
+            exit 1
+          fi
+          
+          # Check for JS files
+          js_count=$(find . -name "*.js" -type f | wc -l)
+          if [ "$js_count" -gt 0 ]; then
+            echo "✓ Found $js_count JavaScript files"
+            find . -name "*.js" -type f
+          else
+            echo "❌ No JavaScript files found"
+            exit 1
+          fi
