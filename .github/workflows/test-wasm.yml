@@ -1,0 +1,139 @@
+name: Test WebAssembly Build
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    paths:
+      - '.github/workflows/build-wasm.yml'
+      - 'test/**'
+  pull_request:
+    branches: [ main, master, develop ]
+    paths:
+      - '.github/workflows/build-wasm.yml'
+      - 'test/**'
+  workflow_call:
+  schedule:
+    - cron: '0 2 * * 1'  # Run weekly on Monday at 2 AM
+
+jobs:
+  test-build:
+    name: Test Build Process
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.58'
+
+      - name: Test Emscripten installation
+        run: |
+          emcc -v
+          emmake --version
+
+      - name: Create test C file
+        run: |
+          mkdir -p test-wasm
+          cat > test-wasm/hello.c << 'EOF'
+          #include <stdio.h>
+          #include <emscripten/emscripten.h>
+          
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
+          
+          EMSCRIPTEN_KEEPALIVE
+          void sayHello() {
+              printf("Hello from WebAssembly!\n");
+          }
+          
+          EMSCRIPTEN_KEEPALIVE
+          int add(int a, int b) {
+              return a + b;
+          }
+          
+          #ifdef __cplusplus
+          }
+          #endif
+          
+          int main() {
+              printf("QEMU WASM Build Test\n");
+              return 0;
+          }
+          EOF
+
+      - name: Compile test to WebAssembly
+        run: |
+          cd test-wasm
+          emcc hello.c -o hello.html \
+            -s WASM=1 \
+            -s EXPORTED_FUNCTIONS="['_main', '_sayHello', '_add']" \
+            -s EXPORTED_RUNTIME_METHODS="['ccall', 'cwrap']" \
+            -O3
+
+      - name: Verify WebAssembly output
+        run: |
+          cd test-wasm
+          ls -la
+          
+          # Check for WASM file
+          if [ -f "hello.wasm" ]; then
+            echo "✓ WASM file generated successfully"
+            file hello.wasm
+          else
+            echo "❌ WASM file not found"
+            exit 1
+          fi
+          
+          # Check for JS file
+          if [ -f "hello.js" ]; then
+            echo "✓ JS file generated successfully"
+            head -20 hello.js
+          else
+            echo "❌ JS file not found"
+            exit 1
+          fi
+
+      - name: Test Node.js execution
+        run: |
+          cd test-wasm
+          node hello.js
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-test-files
+          path: test-wasm/
+          retention-days: 7
+
+  validate-workflow:
+    name: Validate Workflow Syntax
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install yamllint
+        run: |
+          pip install yamllint
+
+      - name: Validate YAML syntax
+        run: |
+          yamllint .github/workflows/build-wasm.yml
+          yamllint .github/workflows/test-wasm.yml
+
+      - name: Validate workflow structure
+        run: |
+          # Check for required sections
+          grep -q "name:" .github/workflows/build-wasm.yml || (echo "❌ Missing name in build-wasm.yml" && exit 1)
+          grep -q "on:" .github/workflows/build-wasm.yml || (echo "❌ Missing on trigger in build-wasm.yml" && exit 1)
+          grep -q "jobs:" .github/workflows/build-wasm.yml || (echo "❌ Missing jobs in build-wasm.yml" && exit 1)
+          
+          grep -q "mymindstorm/setup-emsdk" .github/workflows/build-wasm.yml || (echo "❌ Missing Emscripten setup in build-wasm.yml" && exit 1)
+          grep -q "actions/upload-artifact" .github/workflows/build-wasm.yml || (echo "❌ Missing artifact upload in build-wasm.yml" && exit 1)
+          
+          echo "✓ Workflow structure validation passed"
